@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
@@ -46,7 +46,7 @@ jobs:
           working-directory: "issue-bot"
 
       - name: "Cache downloads"
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ./issue-bot/tmp
           key: "issue-bot-download-v7-${{ github.run_id }}"
@@ -65,17 +65,17 @@ jobs:
         run: |
           echo "shards=$(jq -c '{include: [range(length) | {shard: .}]}' matrix.json)" >> $GITHUB_OUTPUT
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: playground-cache
           path: issue-bot/tmp/playgroundCache.tmp
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: issue-cache
           path: issue-bot/tmp/issueCache.tmp
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: matrix
           path: issue-bot/matrix.json
@@ -92,7 +92,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
@@ -140,7 +140,7 @@ jobs:
         timeout-minutes: 5
         run: ./console.php run ${{ steps.chunk.outputs.phpVersion }} ${{ steps.chunk.outputs.playgroundExamples }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: results-${{ steps.chunk.outputs.phpVersion }}-${{ steps.chunk.outputs.chunkNumber }}
           path: issue-bot/tmp/results-${{ steps.chunk.outputs.phpVersion }}-*.tmp
@@ -153,7 +153,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
@@ -166,17 +166,17 @@ jobs:
         with:
           working-directory: "issue-bot"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: playground-cache
           path: issue-bot/tmp
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: issue-cache
           path: issue-bot/tmp
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: results-*
           merge-multiple: true

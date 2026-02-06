@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
@@ -48,7 +48,7 @@ jobs:
       - name: "Dump phpSymbols.txt"
         run: "php tests/dump-reflection-test-symbols.php"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: phpSymbols
           path: ${{ env.REFLECTION_GOLDEN_SYMBOLS_FILE }}
@@ -79,7 +79,7 @@ jobs:
           attempt_delay: 1000
 
       - name: "Checkout base commit"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.base.sha || github.event.before }}
 
@@ -98,13 +98,13 @@ jobs:
       - name: "Dump previous reflection data"
         run: "php tests/generate-reflection-test.php"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: reflection-${{ matrix.php-version }}.test
           path: ${{ env.REFLECTION_GOLDEN_TEST_FILE }}
 
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - uses: "ramsey/composer-install@v3"
 

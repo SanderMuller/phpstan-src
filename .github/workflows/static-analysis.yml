@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
@@ -67,7 +67,7 @@ jobs:
         if: failure() && (matrix.php-version == '7.4' || matrix.php-version == '8.0' || matrix.php-version == '8.1')
         run: "php -d memory_limit=599M bin/phpstan analyse --generate-baseline baseline-php-${{ matrix.php-version }}.neon"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: ${{ failure() }}
         with:
           name: baseline-${{ matrix.php-version }}
@@ -90,7 +90,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
@@ -103,7 +103,7 @@ jobs:
       - uses: "ramsey/composer-install@v3"
 
       - name: "Cache Result cache"
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ./tmp
           key: "result-cache-v15-${{ matrix.php-version }}-${{ github.run_id }}"
@@ -127,7 +127,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
@@ -152,7 +152,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: "Install PHP"
         uses: "shivammathur/setup-php@v2"
