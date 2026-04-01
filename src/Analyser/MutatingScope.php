@@ -139,8 +139,6 @@ class MutatingScope implements Scope, NodeCallbackInvoker
 	public const KEEP_VOID_ATTRIBUTE_NAME = 'keepVoid';
 	private const CONTAINS_SUPER_GLOBAL_ATTRIBUTE_NAME = 'containsSuperGlobal';
 
-	private const ARRAY_DIM_FETCH_UNION_HAS_OFFSET_VALUE_TYPE_LIMIT = 16;
-
 	/** @var Type[] */
 	private array $resolvedTypes = [];
 
@@ -2732,8 +2730,6 @@ class MutatingScope implements Scope, NodeCallbackInvoker
 				$exprVarType = $scope->getType($expr->var);
 				$isArray = $exprVarType->isArray();
 				if (!$exprVarType instanceof MixedType && !$isArray->no()) {
-					$tooManyHasOffsetValueTypes = false;
-
 					$varType = $exprVarType;
 					if (!$isArray->yes()) {
 						if ($dimType->isInteger()->yes()) {
@@ -2741,30 +2737,9 @@ class MutatingScope implements Scope, NodeCallbackInvoker
 						} else {
 							$varType = TypeCombinator::intersect($exprVarType, StaticTypeFactory::generalOffsetAccessibleType());
 						}
-
-						if ($exprVarType instanceof UnionType) {
-							$hasOffsetAccessoryCount = 0;
-							foreach ($exprVarType->getTypes() as $innerType) {
-								foreach (TypeUtils::getAccessoryTypes($innerType) as $accessoryType) {
-									if (!($accessoryType instanceof HasOffsetValueType)) {
-										continue;
-									}
-
-									$hasOffsetAccessoryCount++;
-
-									if ($hasOffsetAccessoryCount > self::ARRAY_DIM_FETCH_UNION_HAS_OFFSET_VALUE_TYPE_LIMIT) {
-										$tooManyHasOffsetValueTypes = true;
-										break 2;
-									}
-								}
-							}
-						}
 					}
 
-					if (
-						!$tooManyHasOffsetValueTypes
-						&& ($dimType instanceof ConstantIntegerType || $dimType instanceof ConstantStringType)
-					) {
+					if ($dimType instanceof ConstantIntegerType || $dimType instanceof ConstantStringType) {
 						$varType = TypeCombinator::intersect(
 							$varType,
 							new HasOffsetValueType($dimType, $type),
@@ -3230,7 +3205,7 @@ class MutatingScope implements Scope, NodeCallbackInvoker
 			} else {
 				$scope = $scope->removeTypeFromExpression($expr, $type);
 			}
-			$specifiedExpressions[$typeSpecification['exprString']] = ExpressionTypeHolder::createYes($expr, $scope->getType($expr));
+			$specifiedExpressions[$typeSpecification['exprString']] = ExpressionTypeHolder::createYes($expr, $scope->getScopeType($expr));
 		}
 
 		$conditions = [];
@@ -3362,7 +3337,7 @@ class MutatingScope implements Scope, NodeCallbackInvoker
 		return $this->inFirstLevelStatement;
 	}
 
-	public function mergeWith(?self $otherScope): self
+	public function mergeWith(?self $otherScope, bool $preserveVacuousConditionals = false): self
 	{
 		if ($otherScope === null || $this === $otherScope) {
 			return $this;
@@ -3372,6 +3347,18 @@ class MutatingScope implements Scope, NodeCallbackInvoker
 
 		$mergedExpressionTypes = $this->mergeVariableHolders($ourExpressionTypes, $theirExpressionTypes);
 		$conditionalExpressions = $this->intersectConditionalExpressions($otherScope->conditionalExpressions);
+		if ($preserveVacuousConditionals) {
+			$conditionalExpressions = $this->preserveVacuousConditionalExpressions(
+				$conditionalExpressions,
+				$this->conditionalExpressions,
+				$theirExpressionTypes,
+			);
+			$conditionalExpressions = $this->preserveVacuousConditionalExpressions(
+				$conditionalExpressions,
+				$otherScope->conditionalExpressions,
+				$ourExpressionTypes,
+			);
+		}
 		$conditionalExpressions = $this->createConditionalExpressions(
 			$conditionalExpressions,
 			$ourExpressionTypes,
@@ -3478,6 +3465,48 @@ class MutatingScope implements Scope, NodeCallbackInvoker
 	}
 
 	/**
+	 * @param array<string, ConditionalExpressionHolder[]> $currentConditionalExpressions
+	 * @param array<string, ConditionalExpressionHolder[]> $sourceConditionalExpressions
+	 * @param array<string, ExpressionTypeHolder> $otherExpressionTypes
+	 * @return array<string, ConditionalExpressionHolder[]>
+	 */
+	private function preserveVacuousConditionalExpressions(
+		array $currentConditionalExpressions,
+		array $sourceConditionalExpressions,
+		array $otherExpressionTypes,
+	): array
+	{
+		foreach ($sourceConditionalExpressions as $exprString => $holders) {
+			foreach ($holders as $key => $holder) {
+				if (isset($currentConditionalExpressions[$exprString][$key])) {
+					continue;
+				}
+
+				$typeHolder = $holder->getTypeHolder();
+				if ($typeHolder->getCertainty()->no() && !$typeHolder->getExpr() instanceof Variable) {
+					continue;
+				}
+
+				foreach ($holder->getConditionExpressionTypeHolders() as $guardExprString => $guardTypeHolder) {
+					if (!array_key_exists($guardExprString, $otherExpressionTypes)) {
+						continue;
+					}
+
+					$otherType = $otherExpressionTypes[$guardExprString]->getType();
+					$guardType = $guardTypeHolder->getType();
+
+					if ($otherType->isSuperTypeOf($guardType)->no()) {
+						$currentConditionalExpressions[$exprString][$key] = $holder;
+						break;
+					}
+				}
+			}
+		}
+
+		return $currentConditionalExpressions;
+	}
+
+	/**
 	 * @param array<string, ConditionalExpressionHolder[]> $newConditionalExpressions
 	 * @param array<string, ConditionalExpressionHolder[]> $existingConditionalExpressions
 	 * @return array<string, ConditionalExpressionHolder[]>
@@ -3574,6 +3603,15 @@ class MutatingScope implements Scope, NodeCallbackInvoker
 			}
 
 			foreach ($variableTypeGuards as $guardExprString => $guardHolder) {
+				if (
+					array_key_exists($exprString, $theirExpressionTypes)
+					&& $theirExpressionTypes[$exprString]->getCertainty()->yes()
+					&& array_key_exists($guardExprString, $theirExpressionTypes)
+					&& $theirExpressionTypes[$guardExprString]->getCertainty()->yes()
+					&& !$guardHolder->getType()->isSuperTypeOf($theirExpressionTypes[$guardExprString]->getType())->no()
+				) {
+					continue;
+				}
 				$conditionalExpression = new ConditionalExpressionHolder([$guardExprString => $guardHolder], $holder);
 				$conditionalExpressions[$exprString][$conditionalExpression->getKey()] = $conditionalExpression;
 			}

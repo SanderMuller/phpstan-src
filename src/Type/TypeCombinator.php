@@ -26,6 +26,7 @@ use PHPStan\Type\Generic\TemplateMixedType;
 use PHPStan\Type\Generic\TemplateType;
 use PHPStan\Type\Generic\TemplateTypeFactory;
 use PHPStan\Type\Generic\TemplateUnionType;
+use function array_fill;
 use function array_key_exists;
 use function array_key_first;
 use function array_merge;
@@ -150,6 +151,88 @@ final class TypeCombinator
 		$typesCount = count($types);
 		if ($typesCount === 0) {
 			return new NeverType();
+		}
+
+		// Fast path for single non-union type
+		if ($typesCount === 1) {
+			$singleType = $types[0];
+			if (!$singleType instanceof UnionType && !$singleType->isArray()->yes()) {
+				return $singleType;
+			}
+		}
+
+		// Fast path for common 2-type cases
+		if ($typesCount === 2) {
+			$a = $types[0];
+			$b = $types[1];
+
+			// union(never, X) = X and union(X, never) = X
+			if ($a instanceof NeverType && !$a->isExplicit()) {
+				return $b;
+			}
+			if ($b instanceof NeverType && !$b->isExplicit()) {
+				return $a;
+			}
+
+			// union(mixed, X) = mixed (non-explicit, non-template, no subtracted)
+			if ($a instanceof MixedType && !$a->isExplicitMixed() && !$a instanceof TemplateMixedType && $a->getSubtractedType() === null) {
+				return $a;
+			}
+			if ($b instanceof MixedType && !$b->isExplicitMixed() && !$b instanceof TemplateMixedType && $b->getSubtractedType() === null) {
+				return $b;
+			}
+
+			// union(X, X) = X (same object identity)
+			if ($a === $b) {
+				return $a;
+			}
+		}
+
+		// Fast path for N>2: strip implicit NeverTypes and short-circuit on mixed
+		if ($typesCount > 2) {
+			$neverCount = 0;
+			$hasUnionOrBenevolent = false;
+			for ($i = 0; $i < $typesCount; $i++) {
+				$t = $types[$i];
+				if (
+					$t instanceof MixedType
+					&& !$t->isExplicitMixed()
+					&& !$t instanceof TemplateMixedType
+					&& $t->getSubtractedType() === null
+				) {
+					return $t;
+				}
+				if ($t instanceof NeverType && !$t->isExplicit()) {
+					$neverCount++;
+				} elseif ($t instanceof UnionType && !$t instanceof TemplateType) {
+					$hasUnionOrBenevolent = true;
+				}
+			}
+
+			if ($neverCount > 0 && !$hasUnionOrBenevolent) {
+				if ($neverCount === $typesCount) {
+					return new NeverType();
+				}
+
+				$filtered = [];
+				for ($i = 0; $i < $typesCount; $i++) {
+					if ($types[$i] instanceof NeverType && !$types[$i]->isExplicit()) {
+						continue;
+					}
+
+					$filtered[] = $types[$i];
+				}
+				$filteredCount = count($filtered);
+
+				if ($filteredCount === 1 && !$filtered[0]->isArray()->yes()) {
+					return $filtered[0];
+				}
+				if ($filteredCount === 2) {
+					return self::union($filtered[0], $filtered[1]);
+				}
+				$types = $filtered;
+				$typesCount = $filteredCount;
+			}
 		}
 
 		$alreadyNormalized = [];
@@ -461,6 +544,12 @@ final class TypeCombinator
 		if ($a instanceof HasOffsetValueType && $b instanceof HasOffsetValueType) {
 			if ($a->getOffsetType()->equals($b->getOffsetType())) {
 				return [new HasOffsetValueType($a->getOffsetType(), self::union($a->getValueType(), $b->getValueType())), null];
+			}
+		}
+		if ($a instanceof IntersectionType && $b instanceof IntersectionType) {
+			$merged = self::mergeIntersectionsForUnion($a, $b);
+			if ($merged !== null) {
+				return [$merged, null];
 			}
 		}
 		if ($a->isConstantArray()->yes() && $b->isConstantArray()->yes()) {
@@ -1514,6 +1603,66 @@ final class TypeCombinator
 		}
 
 		return new IntersectionType($types);
+	}
+
+	/**
+	 * Merge two IntersectionTypes that have the same structure but differ
+	 * in HasOffsetValueType value types (matched by offset key).
+	 *
+	 * E.g. (A & hasOV('k', X)) | (A & hasOV('k', Y)) → (A & hasOV('k', X|Y))
+	 */
+	private static function mergeIntersectionsForUnion(IntersectionType $a, IntersectionType $b): ?Type
+	{
+		$aTypes = $a->getTypes();
+		$bTypes = $b->getTypes();
+
+		if (count($aTypes) !== count($bTypes)) {
+			return null;
+		}
+
+		$mergedTypes = [];
+		$hasDifference = false;
+		$bUsed = array_fill(0, count($bTypes), false);
+
+		foreach ($aTypes as $aType) {
+			$matched = false;
+			foreach ($bTypes as $bIdx => $bType) {
+				if ($bUsed[$bIdx]) {
+					continue;
+				}
+
+				if ($aType->equals($bType)) {
+					$mergedTypes[] = $aType;
+					$bUsed[$bIdx] = true;
+					$matched = true;
+					break;
+				}
+
+				// HasOffsetValueType: merge value types when offset keys match
+				if ($aType instanceof HasOffsetValueType && $bType instanceof HasOffsetValueType
+					&& $aType->getOffsetType()->equals($bType->getOffsetType())) {
+					$mergedTypes[] = new HasOffsetValueType(
+						$aType->getOffsetType(),
+						self::union($aType->getValueType(), $bType->getValueType()),
+					);
+					$hasDifference = true;
+					$bUsed[$bIdx] = true;
+					$matched = true;
+					break;
+				}
+
+				// HasOffsetType, HasMethodType, HasPropertyType: only equal values match (no merging possible)
+			}
+			if (!$matched) {
+				return null;
+			}
+		}
+
+		if (!$hasDifference) {
+			return null;
+		}
+
+		return self::intersect(...$mergedTypes);
 	}
 
 	public static function removeFalsey(Type $type): Type

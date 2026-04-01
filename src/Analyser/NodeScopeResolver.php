@@ -1146,7 +1146,7 @@ class NodeScopeResolver
 					$throwPoints = array_merge($throwPoints, $branchScopeStatementResult->getThrowPoints());
 					$impurePoints = array_merge($impurePoints, $branchScopeStatementResult->getImpurePoints());
 					$branchScope = $branchScopeStatementResult->getScope();
-					$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
+					$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope, true);
 					$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
 					if (count($branchScopeStatementResult->getEndStatements()) > 0) {
 						$endStatements = array_merge($endStatements, $branchScopeStatementResult->getEndStatements());
@@ -1170,7 +1170,7 @@ class NodeScopeResolver
 
 			if ($stmt->else === null) {
 				if (!$ifAlwaysTrue && !$lastElseIfConditionIsTrue) {
-					$finalScope = $scope->mergeWith($finalScope);
+					$finalScope = $scope->mergeWith($finalScope, true);
 					$alwaysTerminating = false;
 				}
 			} else {
@@ -1182,7 +1182,7 @@ class NodeScopeResolver
 					$throwPoints = array_merge($throwPoints, $branchScopeStatementResult->getThrowPoints());
 					$impurePoints = array_merge($impurePoints, $branchScopeStatementResult->getImpurePoints());
 					$branchScope = $branchScopeStatementResult->getScope();
-					$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
+					$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope, true);
 					$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
 					if (count($branchScopeStatementResult->getEndStatements()) > 0) {
 						$endStatements = array_merge($endStatements, $branchScopeStatementResult->getEndStatements());
@@ -2747,6 +2747,7 @@ class NodeScopeResolver
 					'property assignment',
 					true,
 				);
+				$invalidateExpressions[] = new InvalidateExprNode($node->getPropertyFetch());
 				return;
 			}
 			if ($node instanceof ExecutionEndNode) {
@@ -2849,7 +2850,8 @@ class NodeScopeResolver
 				continue;
 			}
 
-			$scope = $scope->invalidateExpression($invalidateExpression->getExpr(), true);
+			$requireMoreCharacters = $invalidateExpression->getExpr() instanceof Variable;
+			$scope = $scope->invalidateExpression($invalidateExpression->getExpr(), $requireMoreCharacters);
 		}
 
 		return $scope;
@@ -3368,7 +3370,9 @@ class NodeScopeResolver
 					$scope = $scope->restoreThis($restoreThisScope);
 				}
 
-				$deferredInvalidateExpressions[] = [$invalidateExpressions, $uses];
+				if ($this->callCallbackImmediately($parameter, $parameterType, $calleeReflection)) {
+					$deferredInvalidateExpressions[] = [$invalidateExpressions, $uses];
+				}
 			} elseif ($arg->value instanceof Expr\ArrowFunction) {
 				if (
 					$closureBindScope === null
@@ -3416,8 +3420,8 @@ class NodeScopeResolver
 				if ($exprType->isCallable()->yes()) {
 					$acceptors = $exprType->getCallableParametersAcceptors($scope);
 					if (count($acceptors) === 1) {
-						$deferredInvalidateExpressions[] = [$acceptors[0]->getInvalidateExpressions(), $acceptors[0]->getUsedVariables()];
 						if ($this->callCallbackImmediately($parameter, $parameterType, $calleeReflection)) {
+							$deferredInvalidateExpressions[] = [$acceptors[0]->getInvalidateExpressions(), $acceptors[0]->getUsedVariables()];
 							$callableThrowPoints = array_map(static fn (SimpleThrowPoint $throwPoint) => $throwPoint->isExplicit() ? InternalThrowPoint::createExplicit($scope, $throwPoint->getType(), $arg->value, $throwPoint->canContainAnyThrowable()) : InternalThrowPoint::createImplicit($scope, $arg->value), $acceptors[0]->getThrowPoints());
 							if (!$this->implicitThrows) {
 								$callableThrowPoints = array_values(array_filter($callableThrowPoints, static fn (InternalThrowPoint $throwPoint) => $throwPoint->isExplicit()));
