@@ -9,6 +9,7 @@ use PHPStan\DependencyInjection\AutowiredService;
 use PHPStan\Parallel\ParallelAnalyser;
 use PHPStan\Parallel\Scheduler;
 use PHPStan\Process\CpuCoreCounter;
+use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\ShouldNotHappenException;
 use React\EventLoop\StreamSelectLoop;
 use Symfony\Component\Console\Input\InputInterface;
@@ -29,6 +30,7 @@ final class AnalyserRunner
 		private Analyser $analyser,
 		private ParallelAnalyser $parallelAnalyser,
 		private CpuCoreCounter $cpuCoreCounter,
+		private ReflectionProvider $reflectionProvider,
 	)
 	{
 	}
@@ -81,6 +83,12 @@ final class AnalyserRunner
 			}
 
 			if ($mainScript !== null && $schedule->getNumberOfProcesses() > 0) {
+				// Pre-warm the source locator caches (directory symbol scans, composer autoload scans)
+				// in this process before spawning workers. Building the source locator eagerly scans
+				// analysed directories and writes the shared file cache - otherwise every worker
+				// redoes the same scan in parallel against a cold cache.
+				$this->reflectionProvider->hasClass('stdClass');
+
 				$loop = new StreamSelectLoop();
 				$result = null;
 				$promise = $this->parallelAnalyser->analyse($loop, $schedule, $allAnalysedFiles, $mainScript, $postFileCallback, $projectConfigFile, $tmpFile, $insteadOfFile, $input, null);
