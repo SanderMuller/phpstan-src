@@ -107,7 +107,7 @@ final class FileMonitor
 
 	private function getFileHash(string $filePath): string
 	{
-		$hash = hash_file('sha256', $filePath);
+		$hash = hash_file('xxh128', $filePath);
 
 		if ($hash === false) {
 			throw new CouldNotReadFileException($filePath);

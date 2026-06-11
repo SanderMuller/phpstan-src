@@ -344,7 +344,7 @@ final class FileTypeMapper
 				[$nameScopeMap, $files] = $this->createPhpDocNodeMap($fileName, null, null, [], $fileName);
 				$filesWithHashes = [];
 				foreach ($files as $file) {
-					$newHash = hash_file('sha256', $file);
+					$newHash = hash_file('xxh128', $file);
 					$filesWithHashes[$file] = $newHash;
 				}
 				$this->cache->save($cacheKey, $variableCacheKey, [$nameScopeMap, $filesWithHashes]);
@@ -381,7 +381,7 @@ final class FileTypeMapper
 			[$nameScopeMap, $filesWithHashes] = $cached;
 			$useCache = true;
 			foreach ($filesWithHashes as $file => $hash) {
-				$newHash = @hash_file('sha256', $file);
+				$newHash = @hash_file('xxh128', $file);
 				if ($newHash === false) {
 					$useCache = false;
 					break;

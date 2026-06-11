@@ -32,7 +32,7 @@ final class OptimizedDirectorySourceLocatorFactory
 		$files = $this->fileFinder->findFiles([$directory])->getFiles();
 		$fileHashes = [];
 		foreach ($files as $file) {
-			$hash = hash_file('sha256', $file);
+			$hash = hash_file('xxh128', $file);
 			if ($hash === false) {
 				continue;
 			}
@@ -105,7 +105,7 @@ final class OptimizedDirectorySourceLocatorFactory
 	{
 		$fileHashes = [];
 		foreach ($files as $file) {
-			$hash = hash_file('sha256', $file);
+			$hash = hash_file('xxh128', $file);
 			if ($hash === false) {
 				continue;
 			}

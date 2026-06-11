@@ -45,7 +45,7 @@ final class OptimizedSingleFileSourceLocator implements SourceLocator
 
 	private function getVariableCacheKey(string $file): string
 	{
-		$fileHash = hash_file('sha256', $file);
+		$fileHash = hash_file('xxh128', $file);
 		if ($fileHash === false) {
 			throw new CouldNotReadFileException($file);
 		}

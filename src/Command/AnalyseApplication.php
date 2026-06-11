@@ -160,7 +160,7 @@ final class AnalyseApplication
 						continue;
 					}
 
-					$newHash = hash_file('sha256', $file);
+					$newHash = hash_file('xxh128', $file);
 					if ($newHash === $hash) {
 						continue;
 					}

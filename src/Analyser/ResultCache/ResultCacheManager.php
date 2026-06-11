@@ -1206,7 +1206,7 @@ return [
 			return $this->fileHashes[$path];
 		}
 
-		$hash = hash_file('sha256', $path);
+		$hash = hash_file('xxh128', $path);
 		if ($hash === false) {
 			throw new CouldNotReadFileException($path);
 		}

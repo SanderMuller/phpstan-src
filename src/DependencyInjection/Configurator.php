@@ -106,7 +106,7 @@ final class Configurator extends \Nette\Bootstrap\Configurator
 			array_keys($this->dynamicParameters),
 			$this->configs,
 			PHP_VERSION_ID - PHP_RELEASE_VERSION,
-			is_file($attributesPhp) ? hash_file('sha256', $attributesPhp) : 'attributes-missing',
+			is_file($attributesPhp) ? hash_file('xxh128', $attributesPhp) : 'attributes-missing',
 			NeonAdapter::CACHE_KEY,
 			$this->getAllConfigFilesHashes(),
 			var_export(TurboExtensionEnabler::isLoaded(), true),
@@ -242,7 +242,7 @@ final class Configurator extends \Nette\Bootstrap\Configurator
 	{
 		$hashes = [];
 		foreach ($this->allConfigFiles as $file) {
-			$hash = hash_file('sha256', $file);
+			$hash = hash_file('xxh128', $file);
 
 			if ($hash === false) {
 				throw new CouldNotReadFileException($file);

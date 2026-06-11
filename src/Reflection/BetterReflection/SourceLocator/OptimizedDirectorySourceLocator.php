@@ -51,7 +51,7 @@ final class OptimizedDirectorySourceLocator implements SourceLocator
 	 */
 	private function getCacheKeys(string $file, Identifier $identifier): array
 	{
-		$fileHash = hash_file('sha256', $file);
+		$fileHash = hash_file('xxh128', $file);
 		if ($fileHash === false) {
 			throw new CouldNotReadFileException($file);
 		}
