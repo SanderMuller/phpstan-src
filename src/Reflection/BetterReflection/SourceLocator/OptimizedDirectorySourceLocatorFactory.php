@@ -8,8 +8,6 @@ use PHPStan\DependencyInjection\AutowiredService;
 use PHPStan\File\FileFinder;
 use PHPStan\Php\PhpVersion;
 use function array_key_exists;
-use function array_keys;
-use function hash_file;
 use function sprintf;
 
 #[AutowiredService]
@@ -30,62 +28,43 @@ final class OptimizedDirectorySourceLocatorFactory
 	public function createByDirectory(string $directory): OptimizedDirectorySourceLocator
 	{
 		$files = $this->fileFinder->findFiles([$directory])->getFiles();
-		$fileHashes = [];
-		foreach ($files as $file) {
-			$hash = hash_file('xxh128', $file);
-			if ($hash === false) {
-				continue;
-			}
-			$fileHashes[$file] = $hash;
-		}
 
 		$cacheKey = sprintf('odsl-%s', $directory);
-		return $this->createCachedDirectorySourceLocator($fileHashes, $cacheKey);
+		return $this->createCachedDirectorySourceLocator($files, $cacheKey);
 	}
 
 	/**
-	 * @param array<string, string> $fileHashes
+	 * @param string[] $files
 	 * @param non-empty-string $cacheKey
 	 */
-	private function createCachedDirectorySourceLocator(array $fileHashes, string $cacheKey): OptimizedDirectorySourceLocator
+	private function createCachedDirectorySourceLocator(array $files, string $cacheKey): OptimizedDirectorySourceLocator
 	{
 		$variableCacheKey = sprintf('v1-%s', $this->phpVersion->supportsEnums() ? 'enums' : 'no-enums');
 
-		$originalFileHashes = $fileHashes;
-
 		/** @var array<string, array{string, string[], string[], string[]}>|null $cached */
 		$cached = $this->cache->load($cacheKey, $variableCacheKey);
-		$findInFiles = [];
-		if ($cached !== null) {
-			foreach ($cached as $file => [$hash, $classes, $functions, $constants]) {
-				if (!array_key_exists($file, $fileHashes)) {
-					unset($cached[$file]);
-					continue;
-				}
-				$newHash = $fileHashes[$file];
-				unset($fileHashes[$file]);
-				if ($hash === $newHash) {
-					continue;
-				}
+		$cached ??= [];
 
-				$findInFiles[] = $file;
+		$filesWithCachedHashes = [];
+		foreach ($files as $file) {
+			$filesWithCachedHashes[$file] = $cached[$file][0] ?? null;
+		}
+
+		// hashing and symbol extraction both happen in the finder (in parallel for large file sets)
+		$newCached = [];
+		foreach ($this->symbolFinderInFiles->hashAndFindSymbols($filesWithCachedHashes, $this->phpVersion->supportsEnums()) as $file => [$newHash, $symbols]) {
+			if ($symbols === null) {
+				$newCached[$file] = $cached[$file];
+				continue;
 			}
-		} else {
-			$cached = [];
+
+			[$newClasses, $newFunctions, $newConstants] = $symbols;
+			$newCached[$file] = [$newHash, $newClasses, $newFunctions, $newConstants];
 		}
 
-		foreach (array_keys($fileHashes) as $file) {
-			$findInFiles[] = $file;
-		}
+		$this->cache->save($cacheKey, $variableCacheKey, $newCached);
 
-		foreach ($this->symbolFinderInFiles->findSymbols($findInFiles, $this->phpVersion->supportsEnums()) as $file => [$newClasses, $newFunctions, $newConstants]) {
-			$newHash = $originalFileHashes[$file];
-			$cached[$file] = [$newHash, $newClasses, $newFunctions, $newConstants];
-		}
-
-		$this->cache->save($cacheKey, $variableCacheKey, $cached);
-
-		[$classToFile, $functionToFiles, $constantToFile] = $this->changeStructure($cached);
+		[$classToFile, $functionToFiles, $constantToFile] = $this->changeStructure($newCached);
 
 		return new OptimizedDirectorySourceLocator(
 			$this->fileNodesFetcher,
@@ -103,16 +82,7 @@ final class OptimizedDirectorySourceLocatorFactory
 	 */
 	public function createByFiles(array $files, string $uniqueCacheIdentifier): OptimizedDirectorySourceLocator
 	{
-		$fileHashes = [];
-		foreach ($files as $file) {
-			$hash = hash_file('xxh128', $file);
-			if ($hash === false) {
-				continue;
-			}
-			$fileHashes[$file] = $hash;
-		}
-
-		return $this->createCachedDirectorySourceLocator($fileHashes, $uniqueCacheIdentifier);
+		return $this->createCachedDirectorySourceLocator($files, $uniqueCacheIdentifier);
 	}
 
 	/**
