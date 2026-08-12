@@ -3051,6 +3051,10 @@ class MutatingScope implements Scope, NodeCallbackInvoker, CollectedDataEmitter
 			return true;
 		}
 
+		if ($this->isPreciselyResolvedClassConstantFetch($expr)) {
+			return true;
+		}
+
 		if ($expr instanceof ConstFetch) {
 			$loweredConstName = strtolower($expr->name->toString());
 			if (in_array($loweredConstName, ['true', 'false', 'null'], true)) {
@@ -3738,7 +3742,6 @@ class MutatingScope implements Scope, NodeCallbackInvoker, CollectedDataEmitter
 
 		$differingExpressionKeys = [];
 		$mergedExpressionTypes = ScopeOps::mergeVariableHolders($ourExpressionTypes, $theirExpressionTypes, $differingExpressionKeys);
-		$differingExpressionKeys = $this->withoutPreciseClassConstantFetches($differingExpressionKeys, $ourExpressionTypes, $theirExpressionTypes);
 		$conditionalExpressions = ScopeOps::intersectConditionalExpressions($this->conditionalExpressions, $otherScope->conditionalExpressions);
 		if ($preserveVacuousConditionals) {
 			$conditionalExpressions = $this->preserveVacuousConditionalExpressions(
@@ -3790,57 +3793,36 @@ class MutatingScope implements Scope, NodeCallbackInvoker, CollectedDataEmitter
 	}
 
 	/**
-	 * Drops the keys of class-constant fetches that resolve to their declared value.
+	 * Whether the expression is a class-constant fetch that always resolves to its
+	 * declared value, so that remembering a specified type for it can never say
+	 * anything the expression does not already resolve to on its own.
 	 *
-	 * A conditional expression records "when the guard holds, this expression had
-	 * that type in the branch the guard selects". Such a record can only ever pay
-	 * off when the expression resolves to something less precise on its own - and
-	 * a class-constant fetch with a statically known class resolves to the exact
-	 * declared value, unless the constant is configured as dynamic. So the record
-	 * is bookkeeping that can never narrow anything, and an expensive one: creating
-	 * it compares the guard against every member of the (potentially very wide)
-	 * merged guard type.
-	 *
-	 * @param array<string, true> $differingExpressionKeys
-	 * @param array<string, ExpressionTypeHolder> $ourExpressionTypes
-	 * @param array<string, ExpressionTypeHolder> $theirExpressionTypes
-	 * @return array<string, true>
+	 * Constants configured through dynamicConstantNames are excluded: those resolve
+	 * wider than their value, so narrowing them is meaningful.
 	 */
-	private function withoutPreciseClassConstantFetches(
-		array $differingExpressionKeys,
-		array $ourExpressionTypes,
-		array $theirExpressionTypes,
-	): array
+	private function isPreciselyResolvedClassConstantFetch(Expr $expr): bool
 	{
-		foreach (array_keys($differingExpressionKeys) as $exprString) {
-			$holder = $ourExpressionTypes[$exprString] ?? $theirExpressionTypes[$exprString] ?? null;
-			if ($holder === null) {
-				continue;
-			}
-
-			$expr = $holder->getExpr();
-			if (
-				!$expr instanceof ClassConstFetch
-				|| !$expr->class instanceof Name
-				|| !$expr->name instanceof Identifier
-			) {
-				continue;
-			}
-
-			// static::CONST is late-bound, so which class - and therefore which
-			// declared value - it resolves to is not known here.
-			if ($expr->class->toLowerString() === 'static') {
-				continue;
-			}
-
-			if ($this->constantResolver->isDynamicClassConstant($this->resolveName($expr->class), $expr->name->toString())) {
-				continue;
-			}
-
-			unset($differingExpressionKeys[$exprString]);
+		if (
+			!$expr instanceof ClassConstFetch
+			|| !$expr->class instanceof Name
+			|| !$expr->name instanceof Identifier
+		) {
+			return false;
 		}
 
-		return $differingExpressionKeys;
+		// ::class is not a declared constant; its specified type carries class-string
+		// narrowing that callers do rely on.
+		if ($expr->name->toLowerString() === 'class') {
+			return false;
+		}
+
+		// static::CONST is late-bound, so which class - and therefore which declared
+		// value - it resolves to is not known here.
+		if ($expr->class->toLowerString() === 'static') {
+			return false;
+		}
+
+		return !$this->constantResolver->isDynamicClassConstant($this->resolveName($expr->class), $expr->name->toString());
 	}
 
 	/**
