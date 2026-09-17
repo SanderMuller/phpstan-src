@@ -2,7 +2,9 @@
 
 namespace PHPStan\Dependency;
 
+use PhpParser\Node\Name;
 use PHPStan\File\FileHelper;
+use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Testing\PHPStanTestCase;
 
 final class PackageDependencyResolverTest extends PHPStanTestCase
@@ -23,6 +25,33 @@ final class PackageDependencyResolverTest extends PHPStanTestCase
 
 		// A path outside the project entirely.
 		$this->assertNull($resolver->resolvePackage('/outside/the/project/File.php'));
+	}
+
+	public function testResolveVersionedExtensionPackage(): void
+	{
+		$reflectionProvider = self::getContainer()->getByType(ReflectionProvider::class);
+		$resolver = new PackageDependencyResolver([], self::getContainer()->getByType(FileHelper::class));
+
+		// A built-in symbol of an extension whose stubs differ between major versions.
+		$vector = $reflectionProvider->getClass('Ds\\Vector');
+		$this->assertSame('ext-ds', $resolver->resolveVersionedExtensionPackage($vector));
+
+		// Built-in, but its stubs do not differ between versions.
+		$exception = $reflectionProvider->getClass('Exception');
+		$this->assertNull($resolver->resolveVersionedExtensionPackage($exception));
+
+		// Userland code is tracked through its file instead.
+		$own = $reflectionProvider->getClass(self::class);
+		$this->assertNull($resolver->resolveVersionedExtensionPackage($own));
+
+		$strlen = $reflectionProvider->getFunction(new Name('strlen'), null);
+		$this->assertNull($resolver->resolveVersionedExtensionPackage($strlen));
+
+		// The answers are memoized per symbol, so ask again for each of them.
+		$this->assertSame('ext-ds', $resolver->resolveVersionedExtensionPackage($vector));
+		$this->assertNull($resolver->resolveVersionedExtensionPackage($exception));
+		$this->assertNull($resolver->resolveVersionedExtensionPackage($own));
+		$this->assertNull($resolver->resolveVersionedExtensionPackage($strlen));
 	}
 
 	public function testExtractComposerPackageVersions(): void

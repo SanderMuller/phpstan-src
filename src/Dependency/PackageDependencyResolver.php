@@ -50,6 +50,9 @@ final class PackageDependencyResolver
 	/** @var array{classes: array<string, string>, functions: array<string, string>, constants: array<string, string>}|null symbol => extension name */
 	private ?array $versionedExtensionSymbols = null;
 
+	/** @var array<string, string|null> kind-prefixed symbol name => platform package (or null for none) */
+	private array $resolvedExtensionPackages = [];
+
 	/** @param string[] $composerAutoloaderProjectPaths */
 	public function __construct(
 		#[AutowiredParameter]
@@ -145,6 +148,21 @@ final class PackageDependencyResolver
 	 * code, like a polyfill, is not built-in and stays tracked through its file.
 	 */
 	public function resolveVersionedExtensionPackage(ClassReflection|FunctionReflection|ConstantReflection $reflection): ?string
+	{
+		// This is called once per dependency symbol of every node of every analysed file, so the same
+		// symbols get resolved over and over: on a self-analysis 99% of the calls repeat a name the
+		// same process has already answered. Memoize per symbol, the way resolvePackage() does per file.
+		// The prefix keeps the three symbol kinds apart - a class and a function can share a name.
+		$key = ($reflection instanceof ClassReflection ? 'c' : ($reflection instanceof FunctionReflection ? 'f' : 'k'))
+			. $reflection->getName();
+		if (array_key_exists($key, $this->resolvedExtensionPackages)) {
+			return $this->resolvedExtensionPackages[$key];
+		}
+
+		return $this->resolvedExtensionPackages[$key] = $this->doResolveVersionedExtensionPackage($reflection);
+	}
+
+	private function doResolveVersionedExtensionPackage(ClassReflection|FunctionReflection|ConstantReflection $reflection): ?string
 	{
 		$symbols = $this->getVersionedExtensionSymbols();
 		if ($reflection instanceof ClassReflection) {
