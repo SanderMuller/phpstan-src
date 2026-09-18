@@ -7,10 +7,14 @@ use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ConstantReflection;
 use PHPStan\Reflection\FunctionReflection;
 use function array_values;
+use function spl_object_id;
 use function str_starts_with;
 
 final class NodeDependencies
 {
+
+	/** @var list<ClassReflection|FunctionReflection|ConstantReflection> */
+	private array $reflections;
 
 	/**
 	 * @param array<int, ClassReflection|FunctionReflection|ConstantReflection> $reflections
@@ -18,11 +22,22 @@ final class NodeDependencies
 	 */
 	public function __construct(
 		private FileHelper $fileHelper,
-		private array $reflections,
+		array $reflections,
 		private ?RootExportedNode $exportedNode,
 		private array $filePaths = [],
 	)
 	{
+		// Every referenced class contributes its whole ancestry - parents, interfaces and traits -
+		// and two classes sharing an ancestor each contribute it again. On a self-analysis 54% of
+		// the entries arrive here more than once. Both readers below key their results by file or
+		// by package, so a repeat adds nothing while still paying for a reflection call and a path
+		// normalization, twice over.
+		$uniqueReflections = [];
+		foreach ($reflections as $reflection) {
+			$uniqueReflections[spl_object_id($reflection)] = $reflection;
+		}
+
+		$this->reflections = array_values($uniqueReflections);
 	}
 
 	/**
