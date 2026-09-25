@@ -46,6 +46,9 @@ use function class_exists;
 use function count;
 use function dirname;
 use function error_get_last;
+use function fileowner;
+use function fileperms;
+use function function_exists;
 use function get_class;
 use function getcwd;
 use function gettype;
@@ -54,8 +57,10 @@ use function ini_get;
 use function ini_set;
 use function is_dir;
 use function is_file;
+use function is_link;
 use function is_readable;
 use function is_string;
+use function posix_geteuid;
 use function register_shutdown_function;
 use function spl_autoload_functions;
 use function sprintf;
@@ -383,9 +388,9 @@ final class CommandHelper
 			$additionalConfigFiles[] = $projectConfigFile;
 		}
 
-		$createDir = static function (string $path) use ($errorOutput): void {
+		$createDir = static function (string $path, int $mode = 0777) use ($errorOutput): void {
 			try {
-				DirectoryCreator::ensureDirectoryExists($path, 0777);
+				DirectoryCreator::ensureDirectoryExists($path, $mode);
 			} catch (DirectoryCreatorException $e) {
 				$errorOutput->writeLineFormatted($e->getMessage());
 				throw new InceptionNotSuccessfulException();
@@ -393,8 +398,12 @@ final class CommandHelper
 		};
 
 		if (!isset($tmpDir)) {
-			$tmpDir = sys_get_temp_dir() . '/phpstan';
-			$createDir($tmpDir);
+			// PHPStan include()s and unserialize()s the files it caches here, so a directory another
+			// user controls means code execution. Create it before the check, so it is either ours or
+			// a pre-existing one the check can inspect.
+			$tmpDir = self::getDefaultTmpDir();
+			$createDir($tmpDir, 0700);
+			self::checkDefaultTmpDirIsSafe($tmpDir, $errorOutput);
 		}
 
 		try {
@@ -667,6 +676,56 @@ final class CommandHelper
 
 			throw new InceptionNotSuccessfulException();
 		}
+	}
+
+	/**
+	 * Per-user on POSIX, so two users do not share one predictable path. Windows keeps the plain path
+	 * because its system temp directory is already per-user.
+	 */
+	private static function getDefaultTmpDir(): string
+	{
+		$base = sys_get_temp_dir() . '/phpstan';
+		if (DIRECTORY_SEPARATOR === '/' && function_exists('posix_geteuid')) {
+			return $base . '-' . posix_geteuid();
+		}
+
+		return $base;
+	}
+
+	/**
+	 * Refuse a default temporary directory another user could have prepared: a symlink, an owner other
+	 * than us, or a group- or world-writable directory. POSIX only.
+	 *
+	 * @throws InceptionNotSuccessfulException
+	 */
+	private static function checkDefaultTmpDirIsSafe(string $tmpDir, Output $errorOutput): void
+	{
+		if (DIRECTORY_SEPARATOR !== '/' || !function_exists('posix_geteuid')) {
+			return;
+		}
+
+		$reason = null;
+		if (is_link($tmpDir)) {
+			$reason = 'it is a symbolic link';
+		} elseif (is_dir($tmpDir)) {
+			$owner = fileowner($tmpDir);
+			$perms = fileperms($tmpDir);
+			if ($owner === false || $owner !== posix_geteuid()) {
+				$reason = 'it is owned by another user';
+			} elseif ($perms === false || ($perms & 0022) !== 0) {
+				$reason = 'it is writable by other users';
+			}
+		}
+
+		if ($reason === null) {
+			return;
+		}
+
+		$errorOutput->writeLineFormatted(sprintf('<error>Temporary directory %s is not safe to use because %s.</error>', $tmpDir, $reason));
+		$errorOutput->writeLineFormatted('PHPStan writes PHP files there and loads them back, so another user could run code as you.');
+		$errorOutput->writeLineFormatted('Remove the directory, or set a private path with the tmpDir parameter in your configuration file.');
+
+		throw new InceptionNotSuccessfulException();
 	}
 
 }
