@@ -34,6 +34,7 @@ use function defined;
 use function escapeshellarg;
 use function getenv;
 use function ini_get;
+use function is_string;
 use function max;
 use function parse_url;
 use function sprintf;
@@ -178,8 +179,17 @@ final class ParallelAnalyser
 			// phpcs:enable
 			$decoder = new Decoder($connection, true, options: $jsonInvalidUtf8Ignore, maxlength: $this->decoderBufferSize);
 			$encoder = new Encoder($connection, $jsonInvalidUtf8Ignore);
-			$decoder->on('data', function (array $data) use (&$jobs, $decoder, $encoder, $arenaName, $expectedWorkerCount, &$helloCount, $errorOutput, $useFork): void {
-				if ($data['action'] !== 'hello') {
+			$decoder->on('data', function (array $data) use (&$jobs, $connection, $decoder, $encoder, $arenaName, $expectedWorkerCount, &$helloCount, $errorOutput, $useFork): void {
+				if (($data['action'] ?? null) !== 'hello') {
+					return;
+				}
+
+				$identifier = $data['identifier'] ?? null;
+				$process = is_string($identifier) ? $this->processPool->tryGetProcess($identifier) : null;
+				if (!is_string($identifier) || $process === null) {
+					// A hello without a known identifier, for example another local process that
+					// connected to the worker port. Drop it instead of aborting the whole analysis.
+					$connection->close();
 					return;
 				}
 
@@ -205,8 +215,6 @@ final class ParallelAnalyser
 					));
 				}
 
-				$identifier = $data['identifier'];
-				$process = $this->processPool->getProcess($identifier);
 				$process->bindConnection($decoder, $encoder);
 				if (count($jobs) === 0) {
 					$this->processPool->tryQuitProcess($identifier);

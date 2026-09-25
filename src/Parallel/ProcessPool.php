@@ -35,6 +35,12 @@ final class ProcessPool
 		return $this->processes[$identifier];
 	}
 
+	/** Like getProcess() but returns null for an unknown identifier instead of throwing. */
+	public function tryGetProcess(string $identifier): ?Process
+	{
+		return $this->processes[$identifier] ?? null;
+	}
+
 	public function attachProcess(string $identifier, Process $process): void
 	{
 		$this->processes[$identifier] = $process;
