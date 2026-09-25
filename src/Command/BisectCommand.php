@@ -24,18 +24,26 @@ use function array_values;
 use function chmod;
 use function count;
 use function escapeshellarg;
+use function function_exists;
 use function getenv;
+use function hash_equals;
+use function hash_file;
 use function implode;
 use function is_array;
 use function is_file;
 use function is_string;
 use function mkdir;
 use function passthru;
+use function posix_geteuid;
+use function preg_match;
 use function preg_match_all;
+use function preg_split;
 use function sprintf;
 use function strtok;
 use function substr;
 use function sys_get_temp_dir;
+use function trim;
+use function unlink;
 use function urlencode;
 use const PHP_BINARY;
 
@@ -151,8 +159,9 @@ final class BisectCommand extends Command
 
 		$io->writeln(sprintf('<info>%d</info> of them change phpstan.phar.', count($commits)));
 
-		$tmpDir = sys_get_temp_dir() . '/phpstan-bisect';
-		@mkdir($tmpDir, 0777, true);
+		// Per-user and private, so another local user cannot plant a phar for this process to run.
+		$tmpDir = sys_get_temp_dir() . '/phpstan-bisect' . (function_exists('posix_geteuid') ? '-' . posix_geteuid() : '');
+		@mkdir($tmpDir, 0700, true);
 
 		$analyseArgs = $this->buildAnalyseArgs($input);
 
@@ -172,8 +181,16 @@ final class BisectCommand extends Command
 				$step->stepsRemaining === 1 ? '' : 's',
 			));
 
+			try {
+				$expectedChecksum = $this->downloadPharChecksumForCommit($client, $sha);
+			} catch (GuzzleException $e) {
+				$io->error(sprintf('Failed to download .phar-checksum: %s', $e->getMessage()));
+				return 1;
+			}
+
 			$pharPath = $tmpDir . '/phpstan-' . $shortSha . '.phar';
-			if (!is_file($pharPath)) {
+			// Re-download when the cached file does not match, so a planted or stale phar cannot be reused.
+			if (!is_file($pharPath) || !$this->pharMatchesChecksum($pharPath, $expectedChecksum)) {
 				$io->writeln('Downloading phpstan.phar...');
 				try {
 					$this->downloadPharForCommit($client, $sha, $pharPath, $output);
@@ -181,6 +198,12 @@ final class BisectCommand extends Command
 					$io->error(sprintf('Failed to download phpstan.phar: %s', $e->getMessage()));
 					return 1;
 				}
+			}
+
+			if (!$this->pharMatchesChecksum($pharPath, $expectedChecksum)) {
+				@unlink($pharPath);
+				$io->error(sprintf('Downloaded phpstan.phar for %s does not match its .phar-checksum. Refusing to run it.', $shortSha));
+				return 1;
 			}
 
 			$io->writeln('Running analysis...');
@@ -372,6 +395,55 @@ final class BisectCommand extends Command
 		$output->writeln('');
 
 		chmod($pharPath, 0755);
+	}
+
+	/**
+	 * The committed .phar-checksum holds the MD5 on the first line and the SHA1 on the second.
+	 *
+	 * @return array{md5: string, sha1: string}
+	 * @throws GuzzleException
+	 */
+	private function downloadPharChecksumForCommit(Client $client, string $sha): array
+	{
+		$url = sprintf(
+			'https://raw.githubusercontent.com/%s/%s/%s/.phar-checksum',
+			self::REPO_OWNER,
+			self::REPO_NAME,
+			$sha,
+		);
+
+		$body = $client->get($url, [RequestOptions::TIMEOUT => 120])->getBody()->getContents();
+		$lines = preg_split('/\R/', trim($body));
+
+		// Match by hash length rather than line position, so the order in the file does not matter.
+		$checksum = ['md5' => '', 'sha1' => ''];
+		foreach ($lines !== false ? $lines : [] as $hash) {
+			if (preg_match('/^[0-9a-f]{32}$/', $hash) === 1) {
+				$checksum['md5'] = $hash;
+			} elseif (preg_match('/^[0-9a-f]{40}$/', $hash) === 1) {
+				$checksum['sha1'] = $hash;
+			}
+		}
+
+		return $checksum;
+	}
+
+	/**
+	 * @param array{md5: string, sha1: string} $expected
+	 */
+	private function pharMatchesChecksum(string $pharPath, array $expected): bool
+	{
+		if ($expected['md5'] === '' || $expected['sha1'] === '' || !is_file($pharPath)) {
+			return false;
+		}
+
+		$md5 = hash_file('md5', $pharPath);
+		$sha1 = hash_file('sha1', $pharPath);
+		if ($md5 === false || $sha1 === false) {
+			return false;
+		}
+
+		return hash_equals($expected['md5'], $md5) && hash_equals($expected['sha1'], $sha1);
 	}
 
 	public function buildAnalyseArgs(InputInterface $input): string
