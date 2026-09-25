@@ -62,6 +62,7 @@ use function in_array;
 use function is_array;
 use function is_dir;
 use function is_file;
+use function is_link;
 use function ksort;
 use function microtime;
 use function rename;
@@ -1565,16 +1566,22 @@ final class ResultCacheManager
 		// half-written one at the path the next run reads. rename() within a directory is atomic, so
 		// a concurrent run either reads the whole old cache or the whole new one.
 		// Named after the process so two runs sharing a tmpDir cannot write the same temporary file,
-		// and so a leftover from a run that was killed is reused rather than accumulating.
+		// and so a leftover from a run that was killed does not accumulate over the pid range.
 		$pid = getmypid();
 		$temporaryFile = sprintf('%s.%s.tmp', $file, $pid === false ? uniqid() : $pid);
+
+		// The path is predictable, so remove our own leftover and open exclusively ('x'). O_EXCL does
+		// not follow or truncate a symlink or file another user planted at this path in a shared tmpDir.
+		if (is_link($temporaryFile) || is_file($temporaryFile)) {
+			@unlink($temporaryFile);
+		}
 
 		// Written frame by frame, and the array sections entry by entry, so the peak cost of saving is
 		// one entry rather than the whole cache. Serializing the payload in one call would hold the
 		// entire cache in memory twice over - on one project that is 53 MB serialized, 39 MB of it
 		// exportedNodes alone - which is the same trap the var_export writer this replaces avoided by
 		// streaming.
-		$handle = @fopen($temporaryFile, 'w');
+		$handle = @fopen($temporaryFile, 'x');
 		if ($handle === false) {
 			$error = error_get_last();
 			throw new CouldNotWriteFileException($temporaryFile, $error !== null ? $error['message'] : 'unknown cause');
