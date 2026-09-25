@@ -47,13 +47,18 @@ use function array_merge;
 use function count;
 use function defined;
 use function escapeshellarg;
+use function fileperms;
+use function function_exists;
 use function get_class;
 use function http_build_query;
 use function ini_get;
+use function is_dir;
 use function is_file;
+use function is_link;
 use function parse_url;
 use function sprintf;
 use function unlink;
+use const DIRECTORY_SEPARATOR;
 use const JSON_INVALID_UTF8_IGNORE;
 use const PHP_BINARY;
 use const PHP_URL_PORT;
@@ -219,14 +224,52 @@ final class FixerApplication
 	}
 
 	/**
+	 * Returns why the directory is not private to the current user, or null when it is safe. POSIX only;
+	 * Windows and a missing posix extension keep the previous behaviour.
+	 */
+	private function tmpDirUnsafeReason(string $tmpDir): ?string
+	{
+		if (DIRECTORY_SEPARATOR !== '/' || !function_exists('posix_geteuid')) {
+			return null;
+		}
+
+		if (is_link($tmpDir)) {
+			return 'it is a symbolic link';
+		}
+
+		if (!is_dir($tmpDir)) {
+			return null;
+		}
+
+		// Only reject a directory another user can write to: the swap needs write access. A directory
+		// merely owned by another user (a Docker bind mount runs as the host uid) is left alone, so the
+		// documented "mount a persistent volume onto tmpDir" workflow keeps working.
+		$perms = fileperms($tmpDir);
+		if ($perms === false || ($perms & 0022) !== 0) {
+			return 'it is writable by other users';
+		}
+
+		return null;
+	}
+
+	/**
 	 * @throws FixerProcessException
 	 */
 	private function getFixerProcess(OutputInterface $output, int $serverPort): Process
 	{
 		try {
-			DirectoryCreator::ensureDirectoryExists($this->proTmpDir, 0777);
+			DirectoryCreator::ensureDirectoryExists($this->proTmpDir, 0700);
 		} catch (DirectoryCreatorException $e) {
 			$output->writeln($e->getMessage());
+			throw new FixerProcessException();
+		}
+
+		// The fixer phar is verified and then executed from here. A directory another user can write to
+		// lets them swap the phar between the two steps, so refuse one that is not private to us.
+		$unsafeReason = $this->tmpDirUnsafeReason($this->proTmpDir);
+		if ($unsafeReason !== null) {
+			$output->writeln(sprintf('<fg=red>Temporary directory %s is not safe to use because %s.</>', $this->proTmpDir, $unsafeReason));
+			$output->writeln('Set a private path with the tmpDir parameter in the pro section of your configuration file.');
 			throw new FixerProcessException();
 		}
 
