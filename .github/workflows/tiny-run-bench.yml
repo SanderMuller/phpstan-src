@@ -1,0 +1,56 @@
+name: tiny-run-bench
+
+on:
+  push:
+    branches: [tiny-run-bench]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          coverage: none
+          tools: composer
+      - name: Environment
+        run: |
+          php -v
+          php -r 'foreach (["opcache.enable_cli", "opcache.file_cache", "opcache.jit"] as $k) echo $k, "=", var_export(ini_get($k), true), "\n";'
+          uname -a
+      - name: Build arms
+        run: |
+          set -e
+          W=$RUNNER_TEMP/w; mkdir -p $W
+          cd bench/project && composer install -q --no-interaction && cd -
+          for arm in stock sha1 fc fc-sha1; do cp -R bench/project $W/$arm; done
+          mkdir -p $W/fcdir-fc $W/fcdir-fc-sha1
+          php -d phar.readonly=0 bench/make-arm.php $W/sha1/vendor/phpstan/phpstan/phpstan.phar sha1
+          php -d phar.readonly=0 bench/make-arm.php $W/fc/vendor/phpstan/phpstan/phpstan.phar sha512 $W/fcdir-fc
+          php -d phar.readonly=0 bench/make-arm.php $W/fc-sha1/vendor/phpstan/phpstan/phpstan.phar sha1 $W/fcdir-fc-sha1
+          for arm in stock sha1 fc fc-sha1; do
+            (cd $W/$arm && php vendor/bin/phpstan diagnose | grep -E 'Turbo extension|Mechanism' && php vendor/bin/phpstan analyse -c phpstan.neon --no-progress && php vendor/bin/phpstan analyse -c phpstan.neon --no-progress | tail -2)
+          done
+          find $W/fcdir-fc -type f | wc -l
+      - name: Per-file open cost
+        run: |
+          for i in 1 2 3; do php bench/readmany.php bench/project/vendor 2000; done
+          for i in 1 2 3; do php bench/readmany.php $RUNNER_TEMP/w/fcdir-fc 2000; done
+      - name: Bench
+        run: |
+          W=$RUNNER_TEMP/w; A=()
+          for arm in stock sha1 fc fc-sha1; do
+            A+=("$arm-ver=$W/$arm|php vendor/bin/phpstan --version")
+            A+=("$arm-warm=$W/$arm|php vendor/bin/phpstan analyse -c phpstan.neon --no-progress")
+            A+=("$arm-cold=$W/$arm|prep:rm -rf tmp;;php vendor/bin/phpstan analyse -c phpstan.neon --no-progress")
+          done
+          php bench/bench.php 15 "${A[@]}" </dev/null
