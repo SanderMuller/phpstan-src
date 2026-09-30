@@ -342,10 +342,13 @@ final class TurboProcessRestarter
 
 	/**
 	 * Everything that changes the opcodes compiled out of the same phar on the
-	 * same PHP build (OPcache itself separates builds): the extension's
-	 * optimizer pass drops PHPStan's own type checks only when the extension
-	 * is active and --debug is not given (TurboExtensionEnabler::trustOwnTypesIfSuitable()),
-	 * and OPcache stores the optimized result.
+	 * same PHP build (OPcache itself separates builds): which extension binary
+	 * is loaded, and --debug, which keeps the type checks the extension's
+	 * optimizer pass drops (TurboExtensionEnabler::trustOwnTypesIfSuitable()).
+	 * The extension refuses that pass while a file cache is configured, since
+	 * stripped opcodes would outlive the run, so today it is off in every run
+	 * with a file cache. Keying by both keeps the states apart if that ever
+	 * changes.
 	 *
 	 * @param string $turboBinary see describeTurboBinary()
 	 */
@@ -487,7 +490,10 @@ final class TurboProcessRestarter
 	 * Running from the phar, the opcodes also go to a persistent file cache
 	 * in a directory of PHPStan's own (see getFileCacheDirectory()), so the
 	 * next run loads PHPStan instead of compiling it again: a warm run on a
-	 * small project takes about half the time. A file cache is validated by
+	 * small project takes about half the time. The extension's trusted-types
+	 * pass stays off while a file cache is configured (see
+	 * resolveFileCacheKey()); on a large project that cost and the saved
+	 * compilation about cancel out. A file cache is validated by
 	 * the PHP build id and, only with opcache.validate_timestamps, the mtime,
 	 * so the checks are on in that case, at PHP's defaults: without them it
 	 * would serve the previous PHPStan's opcodes after an update (the phar
