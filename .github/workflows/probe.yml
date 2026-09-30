@@ -1,0 +1,31 @@
+name: probe
+
+on:
+  push:
+    branches: [tiny-run-bench]
+    paths: [probe/**, .github/workflows/probe.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          coverage: none
+          tools: composer
+      - run: (cd bench/project && composer install -q --no-interaction)
+      - name: phar as Composer installed it
+        run: php -d opcache.enable_cli=1 -d opcache.validate_timestamps=1 -d opcache.file_update_protection=0 -d opcache.max_file_size=0 probe/mtime.php bench/project/vendor/phpstan/phpstan/phpstan.phar
+      - name: default file_update_protection
+        run: php -d opcache.enable_cli=1 -d opcache.validate_timestamps=1 probe/mtime.php bench/project/vendor/phpstan/phpstan/phpstan.phar
+      - name: phar file dates
+        run: ls -la --time-style=full-iso bench/project/vendor/phpstan/phpstan/ 2>/dev/null || ls -laT bench/project/vendor/phpstan/phpstan/
