@@ -13,8 +13,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-15, windows-2022]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -25,32 +28,35 @@ jobs:
       - name: Environment
         run: |
           php -v
-          php -r 'foreach (["opcache.enable_cli", "opcache.file_cache", "opcache.jit"] as $k) echo $k, "=", var_export(ini_get($k), true), "\n";'
-          uname -a
-      - name: Build arms
+          php -r 'foreach (["opcache.enable_cli", "opcache.file_cache", "opcache.jit", "disable_functions"] as $k) echo $k, "=", var_export(ini_get($k), true), "\n"; echo "pcntl_fork: ", var_export(function_exists("pcntl_fork"), true), "\n";'
+      - name: Install and build arms
         run: |
           set -e
-          W=$RUNNER_TEMP/w; mkdir -p $W
-          cd bench/project && composer install -q --no-interaction && cd -
-          for arm in stock sha1 fc fc-sha1; do cp -R bench/project $W/$arm; done
-          mkdir -p $W/fcdir-fc $W/fcdir-fc-sha1
-          php -d phar.readonly=0 bench/make-arm.php $W/sha1/vendor/phpstan/phpstan/phpstan.phar sha1
-          php -d phar.readonly=0 bench/make-arm.php $W/fc/vendor/phpstan/phpstan/phpstan.phar sha512 $W/fcdir-fc
-          php -d phar.readonly=0 bench/make-arm.php $W/fc-sha1/vendor/phpstan/phpstan/phpstan.phar sha1 $W/fcdir-fc-sha1
-          for arm in stock sha1 fc fc-sha1; do
-            (cd $W/$arm && php vendor/bin/phpstan diagnose | grep -E 'Turbo extension|Mechanism' && php vendor/bin/phpstan analyse -c phpstan.neon --no-progress && php vendor/bin/phpstan analyse -c phpstan.neon --no-progress | tail -2)
-          done
-          find $W/fcdir-fc -type f | wc -l
-      - name: Per-file open cost
+          W="$RUNNER_TEMP/w"
+          (cd bench/project && composer install -q --no-interaction)
+          git clone -q --depth 1 https://github.com/nikic/PHP-Parser "$RUNNER_TEMP/php-parser"
+          php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock fc0 fcv fcve conc
+          if [ "$RUNNER_OS" = Linux ]; then
+            git clone -q --depth 1 https://github.com/tempestphp/tempest-framework "$RUNNER_TEMP/tempest"
+            (cd "$RUNNER_TEMP/tempest" && composer install -q --no-interaction --ignore-platform-reqs --no-scripts)
+            php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib" "$RUNNER_TEMP/tempest"
+          else
+            php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib"
+          fi
+          php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan --neon-only
+          cd "$W/projects/tiny" && php "$W/arms/fcv/phpstan.phar" diagnose | grep -E 'Turbo extension|Mechanism|Reason'
+      - name: Tiny project
+        run: php bench/suite.php "$RUNNER_TEMP/w" tiny 15
+      - name: php-parser lib (271 files)
+        run: php bench/suite.php "$RUNNER_TEMP/w" parser 5
+      - name: php-parser lib, spawned workers
+        run: php bench/suite.php "$RUNNER_TEMP/w" spawn 5
+      - name: Concurrent runs sharing one empty file cache
         run: |
-          for i in 1 2 3; do php bench/readmany.php bench/project/vendor 2000; done
-          for i in 1 2 3; do php bench/readmany.php $RUNNER_TEMP/w/fcdir-fc 2000; done
-      - name: Bench
-        run: |
-          W=$RUNNER_TEMP/w; A=()
-          for arm in stock sha1 fc fc-sha1; do
-            A+=("$arm-ver=$W/$arm|php vendor/bin/phpstan --version")
-            A+=("$arm-warm=$W/$arm|php vendor/bin/phpstan analyse -c phpstan.neon --no-progress")
-            A+=("$arm-cold=$W/$arm|prep:rm -rf tmp;;php vendor/bin/phpstan analyse -c phpstan.neon --no-progress")
-          done
-          php bench/bench.php 15 "${A[@]}" </dev/null
+          if [ "$RUNNER_OS" != Windows ]; then php bench/conc.php "$RUNNER_TEMP/w" 3; fi
+          php bench/conc.php "$RUNNER_TEMP/w" 3 spawn
+      - name: Tempest (full)
+        if: runner.os == 'Linux'
+        run: php bench/suite.php "$RUNNER_TEMP/w" tempest 3
+      - name: File cache size
+        run: du -sh "$RUNNER_TEMP"/w/fcdir-* || true
