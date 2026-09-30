@@ -25,6 +25,20 @@ if ($dir !== null) {
 	}
 	$phar[$inner] = $src;
 }
-$phar->setSignatureAlgorithm($alg === 'sha1' ? Phar::SHA1 : Phar::SHA512);
 $phar->stopBuffering();
+unset($phar);
+// A Phar API rewrite can leave members at mtime 0 (seen on Linux), which OPcache refuses to cache with
+// validate_timestamps on. Stamp them the way compiler/build/resign.php does.
+require_once __DIR__ . '/tools/vendor/autoload.php';
+$util = new Seld\PharUtils\Timestamps($pharPath);
+$util->updateTimestamps(new DateTimeImmutable('2026-09-29 09:57:28'));
+$util->save($pharPath, $alg === 'sha1' ? Phar::SHA1 : Phar::SHA512);
+$zero = 0;
+foreach (new RecursiveIteratorIterator(new Phar($pharPath)) as $m) {
+	$zero += $m->getMTime() === 0 ? 1 : 0;
+}
+if ($zero > 0) {
+	fwrite(STDERR, "$zero members at mtime 0\n");
+	exit(1);
+}
 echo $pharPath, ': ', (new Phar($pharPath))->getSignature()['hash_type'], $dir !== null ? ", file cache $dir" . ($vts ? ', timestamps on' : '') : '', "\n";

@@ -3,7 +3,7 @@ name: tiny-run-bench
 on:
   push:
     branches: [tiny-run-bench]
-    paths-ignore: [sig/**, probe/**, .github/workflows/sig-bench.yml, .github/workflows/probe.yml, .github/workflows/tiny-run-bench.yml]
+    paths-ignore: [sig/**, probe/**, .github/workflows/sig-bench.yml, .github/workflows/probe.yml]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2022]
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -35,6 +35,7 @@ jobs:
           set -e
           W="$RUNNER_TEMP/w"
           (cd bench/project && composer install -q --no-interaction)
+          (cd bench/tools && composer install -q --no-interaction)
           git clone -q --depth 1 https://github.com/nikic/PHP-Parser "$RUNNER_TEMP/php-parser"
           php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock fc0 fcv fcve conc
           if [ "$RUNNER_OS" = Linux ]; then
