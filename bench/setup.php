@@ -20,12 +20,16 @@ foreach ($neonOnly ? [] : $arms as $arm) {
 	$fc = "$w/fcdir-$arm";
 	@mkdir($fc, 0777, true);
 	$args = match (true) {
-		$arm === 'stock' => ['sha512'],
+		$arm === 'stock', $arm === 'daemon' => ['sha512'],
 		$arm === 'fc0' => ['sha512', $fc],
 		default => ['sha512', $fc, 'vts'],
 	};
 	passthru(escapeshellarg(PHP_BINARY) . ' -d phar.readonly=0 ' . escapeshellarg(__DIR__ . '/make-arm.php') . ' ' . implode(' ', array_map('escapeshellarg', ["$dst/phpstan.phar", ...$args])), $ec);
 	if ($ec !== 0) exit($ec);
+	if ($arm === 'daemon') {
+		passthru(escapeshellarg(PHP_BINARY) . ' -d phar.readonly=0 ' . escapeshellarg(__DIR__ . '/make-daemon.php') . ' ' . escapeshellarg("$dst/phpstan.phar"), $ec);
+		if ($ec !== 0) exit($ec);
+	}
 }
 foreach (glob("$w/projects/*", GLOB_ONLYDIR) as $proj) {
 	$base = file_get_contents("$proj/base.neon");

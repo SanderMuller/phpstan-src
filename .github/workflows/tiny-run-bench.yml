@@ -37,26 +37,30 @@ jobs:
           (cd bench/project && composer install -q --no-interaction)
           (cd bench/tools && composer install -q --no-interaction)
           git clone -q --depth 1 https://github.com/nikic/PHP-Parser "$RUNNER_TEMP/php-parser"
-          php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock fc0 fcv fcve conc
-          if [ "$RUNNER_OS" = Linux ]; then
-            git clone -q --depth 1 https://github.com/tempestphp/tempest-framework "$RUNNER_TEMP/tempest"
-            (cd "$RUNNER_TEMP/tempest" && composer install -q --no-interaction --ignore-platform-reqs --no-scripts)
-            php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib" "$RUNNER_TEMP/tempest"
-          else
-            php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib"
-          fi
+          php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock fcv daemon
+          php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib"
           php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan --neon-only
           cd "$W/projects/tiny" && php "$W/arms/fcv/phpstan.phar" diagnose | grep -E 'Turbo extension|Mechanism|Reason'
-      - name: Tiny project
-        run: php bench/suite.php "$RUNNER_TEMP/w" tiny 7
-      - name: Cache contents after the tiny suite
-        run: php bench/probe.php "$RUNNER_TEMP/w"
-      - name: php-parser lib (271 files)
-        run: php bench/suite.php "$RUNNER_TEMP/w" parser 5
-      - name: php-parser lib, spawned workers
-        run: php bench/suite.php "$RUNNER_TEMP/w" spawn 5
-      - name: Tempest (full)
-        if: runner.os == 'Linux'
-        run: php bench/suite.php "$RUNNER_TEMP/w" tempest 3
-      - name: Cache contents at the end
-        run: php bench/probe.php "$RUNNER_TEMP/w"
+      - name: Start the daemon prototype
+        run: php bench/start-daemon.php "$RUNNER_TEMP/w" "$RUNNER_TEMP/d.sock"
+      - name: Tiny project, stock vs file cache vs daemon
+        env:
+          ARMS: stock,fcv,daemon
+          DAEMON_SOCKET: ${{ runner.temp }}/d.sock
+        run: php bench/suite.php "$RUNNER_TEMP/w" tiny 12
+      - name: php-parser lib (271 files), stock vs file cache vs daemon
+        env:
+          ARMS: stock,fcv,daemon
+          DAEMON_SOCKET: ${{ runner.temp }}/d.sock
+        run: php bench/suite.php "$RUNNER_TEMP/w" parser 7
+      - name: Daemon output check
+        run: |
+          cd "$RUNNER_TEMP/w/projects/parser"
+          php "$RUNNER_TEMP/w/arms/stock/phpstan.phar" analyse -c phpstan-stock.neon --no-progress --error-format=raw > stock.txt; echo "stock exit $?"
+          : > "$RUNNER_TEMP/w/daemon.log"
+          php "$GITHUB_WORKSPACE/bench/client.php" "$RUNNER_TEMP/d.sock" analyse -c phpstan-daemon.neon --no-progress --error-format=raw; echo "daemon exit $?"
+          grep '/lib/' "$RUNNER_TEMP/w/daemon.log" | sed 's#.*/lib/#lib/#' | sort > daemon.txt
+          sed 's#.*/lib/#lib/#' stock.txt | grep '^lib/' | sort > stock-sorted.txt
+          wc -l daemon.txt stock-sorted.txt
+          diff stock-sorted.txt daemon.txt && echo "daemon errors identical to stock"
+          php "$GITHUB_WORKSPACE/bench/client.php" "$RUNNER_TEMP/d.sock" diagnose; grep -E 'Turbo extension|Mechanism' "$RUNNER_TEMP/w/daemon.log"
