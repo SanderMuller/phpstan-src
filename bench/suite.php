@@ -16,7 +16,9 @@ $kinds = match ($suite) {
 $specs = [];
 foreach ($arms as $arm) {
 	$phar = escapeshellarg("$w/arms/$arm/phpstan.phar");
-	$bin = $arm === 'daemon' ? $client : ($arm === 'pre' ? 'TMPDIR=' . escapeshellarg("$w/systemp-pre") . ' ' : '') . "$php$flags $phar";
+	// GitHub Actions sets CI, which turns the file cache off; prci keeps it to show that
+	$noCi = in_array($arm, ['pr', 'pre'], true) ? 'env -u CI -u GITHUB_ACTIONS ' : '';
+	$bin = $arm === 'daemon' ? $client : $noCi . ($arm === 'pre' ? 'TMPDIR=' . escapeshellarg("$w/systemp-pre") . ' ' : '') . "$php$flags $phar";
 	$analyse = "$bin analyse -c phpstan-$arm.neon --no-progress --memory-limit=-1";
 	exec('cd ' . escapeshellarg($project) . " && $analyse > " . (PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null') . ' 2>&1', $o, $ec);
 	echo "primed $suite/$arm, exit $ec\n";

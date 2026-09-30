@@ -7,6 +7,7 @@ use Phar;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Throwable;
+use function class_exists;
 use function explode;
 use function extension_loaded;
 use function filemtime;
@@ -15,6 +16,7 @@ use function fileperms;
 use function filesize;
 use function function_exists;
 use function get_cfg_var;
+use function getenv;
 use function implode;
 use function in_array;
 use function ini_get;
@@ -106,8 +108,16 @@ final class TurboProcessRestarter
 		'opcache.max_accelerated_files',
 	];
 
-	/** The resolved file cache directory, memoized per process; false while unresolved */
-	private static string|false|null $fileCacheDirectory = false;
+	/**
+	 * Environment variables that CI services set (to a non-empty value other
+	 * than "false"): a CI job usually starts with an empty temp dir, so a file
+	 * cache there costs its writes on every run and is never read
+	 */
+	private const CI_ENVIRONMENT_VARIABLES = ['CI', 'GITHUB_ACTIONS', 'GITLAB_CI', 'BUILDKITE', 'TF_BUILD', 'JENKINS_URL', 'TEAMCITY_VERSION'];
+
+	private static ?string $fileCacheDirectory = null;
+
+	private static bool $fileCacheDirectoryResolved = false;
 
 	/**
 	 * The extension path this process was given through -d — by the restart,
@@ -289,7 +299,10 @@ final class TurboProcessRestarter
 	 * as opcodes, unchecked, inside PHPStan.
 	 *
 	 * Only runs from the phar get one: a source checkout changes all the time
-	 * and has no build to key the directory by. Not on Windows either: every
+	 * and has no build to key the directory by. Not in CI (see
+	 * resolveContinuousIntegration()): an empty temp dir at the start of every
+	 * job would make the cache pure cost, and with a file cache the
+	 * extension's trusted-types pass is off. Not on Windows either: every
 	 * spawned worker there gets its own opcache.cache_id (see ProcessHelper),
 	 * and OPcache then keeps a separate file cache per worker that no later
 	 * run reuses: 2 GB after one benchmark run on a GitHub runner, and cold
@@ -297,12 +310,15 @@ final class TurboProcessRestarter
 	 */
 	private static function getFileCacheDirectory(): ?string
 	{
-		if (self::$fileCacheDirectory !== false) {
+		if (self::$fileCacheDirectoryResolved) {
 			return self::$fileCacheDirectory;
 		}
 
-		self::$fileCacheDirectory = null;
-		if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid')) {
+		self::$fileCacheDirectoryResolved = true;
+		if (PHP_OS_FAMILY === 'Windows' || !function_exists('posix_geteuid') || !class_exists('Phar', false)) {
+			return null;
+		}
+		if (self::resolveContinuousIntegration(getenv())) {
 			return null;
 		}
 
@@ -358,6 +374,21 @@ final class TurboProcessRestarter
 	}
 
 	/**
+	 * @param array<string, string> $environment getenv()
+	 */
+	public static function resolveContinuousIntegration(array $environment): bool
+	{
+		foreach (self::CI_ENVIRONMENT_VARIABLES as $name) {
+			$value = $environment[$name] ?? '';
+			if ($value !== '' && strtolower($value) !== 'false') {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * The same answer before the restart and in the restarted process: the
 	 * binary the restart loads with -d, or the version of one loaded by the
 	 * php.ini, or none.
@@ -378,7 +409,7 @@ final class TurboProcessRestarter
 		return 'none';
 	}
 
-	private static function isPrivateDirectory(string $directory, int $userId): bool
+	public static function isPrivateDirectory(string $directory, int $userId): bool
 	{
 		if (is_link($directory) || !is_dir($directory)) {
 			return false;
@@ -395,7 +426,7 @@ final class TurboProcessRestarter
 	 * no longer installed. Runs only when a new key directory was created, so
 	 * about once per update.
 	 */
-	private static function pruneFileCacheDirectories(string $baseDirectory, string $currentKey, int $now): void
+	public static function pruneFileCacheDirectories(string $baseDirectory, string $currentKey, int $now): void
 	{
 		$entries = @scandir($baseDirectory);
 		if ($entries === false) {

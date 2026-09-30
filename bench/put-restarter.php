@@ -5,6 +5,7 @@ require __DIR__ . '/tools/vendor/autoload.php';
 [$_, $pharPath, $file] = $argv;
 $phar = new Phar($pharPath);
 $phar['src/Turbo/TurboProcessRestarter.php'] = file_get_contents($file);
+$phar['src/Turbo/TurboDiagnoseExtension.php'] = file_get_contents(dirname($file) . '/TurboDiagnoseExtension.php');
 unset($phar);
 $util = new Seld\PharUtils\Timestamps($pharPath);
 $util->updateTimestamps(new DateTimeImmutable('2026-09-30 06:00:00'));

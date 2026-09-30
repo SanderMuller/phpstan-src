@@ -34,7 +34,7 @@ jobs:
           (cd bench/tools && composer install -q --no-interaction)
           php bench/project/vendor/phpstan/phpstan/phpstan.phar --version
           git clone -q --depth 1 https://github.com/nikic/PHP-Parser "$RUNNER_TEMP/php-parser"
-          php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock pr pre
+          php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock pr pre prci
           if [ "$RUNNER_OS" = Linux ]; then
             git clone -q --depth 1 https://github.com/tempestphp/tempest-framework "$RUNNER_TEMP/tempest"
             (cd "$RUNNER_TEMP/tempest" && composer install -q --no-interaction --ignore-platform-reqs --no-scripts)
@@ -43,14 +43,16 @@ jobs:
             php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib"
           fi
           php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan --neon-only
-          cd "$W/projects/tiny" && php "$W/arms/pr/phpstan.phar" diagnose | grep -E 'Turbo extension|Mechanism|Reason'
+          cd "$W/projects/tiny"
+          env -u CI -u GITHUB_ACTIONS php "$W/arms/pr/phpstan.phar" diagnose | grep -E 'Turbo extension|trusted|Mechanism'
+          php "$W/arms/prci/phpstan.phar" diagnose | grep -E 'Turbo extension|trusted|Mechanism'
       - name: Tiny project
         env:
-          ARMS: stock,pr,pre
+          ARMS: stock,pr,pre,prci
         run: php bench/suite.php "$RUNNER_TEMP/w" tiny 12
       - name: php-parser lib (271 files)
         env:
-          ARMS: stock,pr,pre
+          ARMS: stock,pr,pre,prci
         run: php bench/suite.php "$RUNNER_TEMP/w" parser 7
       - name: php-parser lib, spawned workers
         env:
@@ -69,7 +71,7 @@ jobs:
             cd "$RUNNER_TEMP/w/projects/$p"
             rm -rf tmp-stock tmp-pr
             php "$RUNNER_TEMP/w/arms/stock/phpstan.phar" analyse -c phpstan-stock.neon --no-progress --error-format=raw --memory-limit=-1 2>/dev/null | sort > stock.txt
-            php "$RUNNER_TEMP/w/arms/pr/phpstan.phar" analyse -c phpstan-pr.neon --no-progress --error-format=raw --memory-limit=-1 2>/dev/null | sort > pr.txt
+            env -u CI -u GITHUB_ACTIONS php "$RUNNER_TEMP/w/arms/pr/phpstan.phar" analyse -c phpstan-pr.neon --no-progress --error-format=raw --memory-limit=-1 2>/dev/null | sort > pr.txt
             echo "$p: $(wc -l < stock.txt) stock lines, $(wc -l < pr.txt) pr lines"
             diff -q stock.txt pr.txt && echo "$p: identical"
           done

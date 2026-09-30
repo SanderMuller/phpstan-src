@@ -20,13 +20,13 @@ foreach ($neonOnly ? [] : $arms as $arm) {
 	$fc = "$w/fcdir-$arm";
 	@mkdir($fc, 0777, true);
 	$args = match (true) {
-		$arm === 'stock', $arm === 'daemon', $arm === 'pr', $arm === 'pre' => ['sha512'],
+		$arm === 'stock', $arm === 'daemon', $arm === 'pr', $arm === 'pre', $arm === 'prci' => ['sha512'],
 		$arm === 'fc0' => ['sha512', $fc],
 		default => ['sha512', $fc, 'vts'],
 	};
 	passthru(escapeshellarg(PHP_BINARY) . ' -d phar.readonly=0 ' . escapeshellarg(__DIR__ . '/make-arm.php') . ' ' . implode(' ', array_map('escapeshellarg', ["$dst/phpstan.phar", ...$args])), $ec);
 	if ($ec !== 0) exit($ec);
-	if ($arm === 'pr' || $arm === 'pre') {
+	if ($arm === 'pr' || $arm === 'pre' || $arm === 'prci') {
 		passthru(escapeshellarg(PHP_BINARY) . ' -d phar.readonly=0 ' . escapeshellarg(__DIR__ . '/put-restarter.php') . ' ' . escapeshellarg("$dst/phpstan.phar") . ' ' . escapeshellarg(__DIR__ . '/pr/TurboProcessRestarter.php'), $ec);
 		if ($ec !== 0) exit($ec);
 	}
