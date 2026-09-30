@@ -46,17 +46,15 @@ jobs:
           php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan --neon-only
           cd "$W/projects/tiny" && php "$W/arms/fcv/phpstan.phar" diagnose | grep -E 'Turbo extension|Mechanism|Reason'
       - name: Tiny project
-        run: php bench/suite.php "$RUNNER_TEMP/w" tiny 15
+        run: php bench/suite.php "$RUNNER_TEMP/w" tiny 7
+      - name: Cache contents after the tiny suite
+        run: php bench/probe.php "$RUNNER_TEMP/w"
       - name: php-parser lib (271 files)
         run: php bench/suite.php "$RUNNER_TEMP/w" parser 5
       - name: php-parser lib, spawned workers
         run: php bench/suite.php "$RUNNER_TEMP/w" spawn 5
-      - name: Concurrent runs sharing one empty file cache
-        run: |
-          if [ "$RUNNER_OS" != Windows ]; then php bench/conc.php "$RUNNER_TEMP/w" 3; fi
-          php bench/conc.php "$RUNNER_TEMP/w" 3 spawn
       - name: Tempest (full)
         if: runner.os == 'Linux'
         run: php bench/suite.php "$RUNNER_TEMP/w" tempest 3
-      - name: File cache size
-        run: du -sh "$RUNNER_TEMP"/w/fcdir-* || true
+      - name: Cache contents at the end
+        run: php bench/probe.php "$RUNNER_TEMP/w"

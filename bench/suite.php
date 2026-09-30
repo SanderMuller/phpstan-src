@@ -6,7 +6,7 @@ $php = escapeshellarg(PHP_BINARY);
 $rm = $php . ' ' . escapeshellarg(__DIR__ . '/rmrf.php');
 $project = $w . '/projects/' . ($suite === 'spawn' ? 'parser' : $suite);
 $flags = $suite === 'spawn' ? ' -d disable_functions=pcntl_fork' : '';
-$arms = $suite === 'tiny' ? ['stock', 'fc0', 'fcv', 'fcve'] : ['stock', 'fcv', 'fcve'];
+$arms = $suite === 'tiny' ? ['stock', 'fc0', 'fcv', 'fcve'] : ['stock', 'fc0', 'fcv'];
 $kinds = match ($suite) {
 	'tiny' => ['ver', 'warm', 'cold'],
 	'parser' => ['warm', 'cold'],
