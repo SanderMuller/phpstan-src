@@ -1,0 +1,36 @@
+name: sig-bench
+
+on:
+  push:
+    branches: [tiny-run-bench]
+    paths: [sig/**, .github/workflows/sig-bench.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  sig:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2022]
+        php: ["8.3", "8.5"]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer
+      - name: CPU
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then grep -m1 'model name' /proc/cpuinfo || true; grep -o -m1 -w 'sha_ni' /proc/cpuinfo || echo "no sha_ni flag"; grep -o -m1 -w 'sha2' /proc/cpuinfo || true; fi
+          if [ "$RUNNER_OS" = macOS ]; then sysctl -n machdep.cpu.brand_string; fi
+      - name: Signature algorithms
+        run: |
+          (cd bench/project && composer install -q --no-interaction)
+          php -d phar.readonly=0 sig/sig.php bench/project/vendor/phpstan/phpstan/phpstan.phar

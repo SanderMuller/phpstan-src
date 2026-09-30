@@ -3,6 +3,7 @@ name: tiny-run-bench
 on:
   push:
     branches: [tiny-run-bench]
+    paths-ignore: [sig/**, .github/workflows/sig-bench.yml, .github/workflows/tiny-run-bench.yml]
   workflow_dispatch:
 
 permissions:
