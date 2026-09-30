@@ -23,9 +23,16 @@ jobs:
           coverage: none
           tools: composer
       - run: (cd bench/project && composer install -q --no-interaction)
-      - name: phar as Composer installed it
-        run: php -d opcache.enable_cli=1 -d opcache.validate_timestamps=1 -d opcache.file_update_protection=0 -d opcache.max_file_size=0 probe/mtime.php bench/project/vendor/phpstan/phpstan/phpstan.phar
-      - name: default file_update_protection
-        run: php -d opcache.enable_cli=1 -d opcache.validate_timestamps=1 probe/mtime.php bench/project/vendor/phpstan/phpstan/phpstan.phar
-      - name: phar file dates
-        run: ls -la --time-style=full-iso bench/project/vendor/phpstan/phpstan/ 2>/dev/null || ls -laT bench/project/vendor/phpstan/phpstan/
+      - name: Inside PHPStan, stock / timestamps off / timestamps on
+        run: |
+          PKG=bench/project/vendor/phpstan/phpstan
+          mkdir -p "$RUNNER_TEMP/fc0" "$RUNNER_TEMP/fcv"
+          for arm in stock fc0 fcv; do cp -R $PKG "$RUNNER_TEMP/arm-$arm"; done
+          php -d phar.readonly=0 bench/make-arm.php "$RUNNER_TEMP/arm-fc0/phpstan.phar" sha512 "$RUNNER_TEMP/fc0"
+          php -d phar.readonly=0 bench/make-arm.php "$RUNNER_TEMP/arm-fcv/phpstan.phar" sha512 "$RUNNER_TEMP/fcv" vts
+          cd probe/proj
+          for arm in stock fc0 fcv; do for run in 1 2; do
+            echo "== $arm run $run"
+            php "$RUNNER_TEMP/arm-$arm/phpstan.phar" analyse -c phpstan.neon --debug --no-progress 2>&1 | grep PROBE || true
+          done; done
+          find "$RUNNER_TEMP/fcv" -name '*.bin' | wc -l
