@@ -26,46 +26,55 @@ jobs:
           php-version: "8.5"
           coverage: none
           tools: composer
-      - name: Environment
-        run: |
-          php -v
-          php -r 'foreach (["opcache.enable_cli", "opcache.file_cache", "opcache.jit", "disable_functions"] as $k) echo $k, "=", var_export(ini_get($k), true), "\n"; echo "pcntl_fork: ", var_export(function_exists("pcntl_fork"), true), "\n";'
       - name: Install and build arms
         run: |
           set -e
           W="$RUNNER_TEMP/w"
           (cd bench/project && composer install -q --no-interaction)
           (cd bench/tools && composer install -q --no-interaction)
+          php bench/project/vendor/phpstan/phpstan/phpstan.phar --version
           git clone -q --depth 1 https://github.com/nikic/PHP-Parser "$RUNNER_TEMP/php-parser"
-          php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock fcv daemon
-          php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib"
+          php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock pr pre
+          if [ "$RUNNER_OS" = Linux ]; then
+            git clone -q --depth 1 https://github.com/tempestphp/tempest-framework "$RUNNER_TEMP/tempest"
+            (cd "$RUNNER_TEMP/tempest" && composer install -q --no-interaction --ignore-platform-reqs --no-scripts)
+            php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib" "$RUNNER_TEMP/tempest"
+          else
+            php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib"
+          fi
           php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan --neon-only
-          cd "$W/projects/tiny" && php "$W/arms/fcv/phpstan.phar" diagnose | grep -E 'Turbo extension|Mechanism|Reason'
-      - name: Start the daemon prototype
-        run: php bench/start-daemon.php "$RUNNER_TEMP/w" "$RUNNER_TEMP/d.sock"
-      - name: Tiny project, stock vs file cache vs daemon
+          cd "$W/projects/tiny" && php "$W/arms/pr/phpstan.phar" diagnose | grep -E 'Turbo extension|Mechanism|Reason'
+      - name: Tiny project
         env:
-          ARMS: stock,fcv,daemon
-          DAEMON_SOCKET: ${{ runner.temp }}/d.sock
+          ARMS: stock,pr,pre
         run: php bench/suite.php "$RUNNER_TEMP/w" tiny 12
-      - name: php-parser lib (271 files), stock vs file cache vs daemon
+      - name: php-parser lib (271 files)
         env:
-          ARMS: stock,fcv,daemon
-          DAEMON_SOCKET: ${{ runner.temp }}/d.sock
+          ARMS: stock,pr,pre
         run: php bench/suite.php "$RUNNER_TEMP/w" parser 7
-      - name: Daemon request CPU (whole process tree), php-parser lib cold
-        run: |
-          cd "$RUNNER_TEMP/w/projects/parser"
-          for i in 1 2 3; do rm -rf tmp-daemon; DAEMON_CPU=1 php "$GITHUB_WORKSPACE/bench/client.php" "$RUNNER_TEMP/d.sock" analyse -c phpstan-daemon.neon --no-progress --memory-limit=-1 || true; done
-      - name: Daemon output check
+      - name: php-parser lib, spawned workers
+        env:
+          ARMS: stock,pr,pre
+        run: php bench/suite.php "$RUNNER_TEMP/w" spawn 7
+      - name: Tempest (full)
+        if: runner.os == 'Linux'
+        env:
+          ARMS: stock,pr,pre
+        run: php bench/suite.php "$RUNNER_TEMP/w" tempest 3
+      - name: Same errors as stock
         run: |
           set +e
-          cd "$RUNNER_TEMP/w/projects/parser"
-          php "$RUNNER_TEMP/w/arms/stock/phpstan.phar" analyse -c phpstan-stock.neon --no-progress --error-format=raw > stock.txt; echo "stock exit $?"
-          : > "$RUNNER_TEMP/w/daemon.log"
-          php "$GITHUB_WORKSPACE/bench/client.php" "$RUNNER_TEMP/d.sock" analyse -c phpstan-daemon.neon --no-progress --error-format=raw; echo "daemon exit $?"
-          grep '/lib/' "$RUNNER_TEMP/w/daemon.log" | sed 's#.*/lib/#lib/#' | sort > daemon.txt
-          sed 's#.*/lib/#lib/#' stock.txt | grep '^lib/' | sort > stock-sorted.txt
-          wc -l daemon.txt stock-sorted.txt
-          diff stock-sorted.txt daemon.txt && echo "daemon errors identical to stock" || { echo "DAEMON OUTPUT DIFFERS"; exit 1; }
-          php "$GITHUB_WORKSPACE/bench/client.php" "$RUNNER_TEMP/d.sock" diagnose; grep -E 'Turbo extension|Mechanism' "$RUNNER_TEMP/w/daemon.log"
+          for p in parser tempest; do
+            [ -d "$RUNNER_TEMP/w/projects/$p" ] || continue
+            cd "$RUNNER_TEMP/w/projects/$p"
+            rm -rf tmp-stock tmp-pr
+            php "$RUNNER_TEMP/w/arms/stock/phpstan.phar" analyse -c phpstan-stock.neon --no-progress --error-format=raw --memory-limit=-1 2>/dev/null | sort > stock.txt
+            php "$RUNNER_TEMP/w/arms/pr/phpstan.phar" analyse -c phpstan-pr.neon --no-progress --error-format=raw --memory-limit=-1 2>/dev/null | sort > pr.txt
+            echo "$p: $(wc -l < stock.txt) stock lines, $(wc -l < pr.txt) pr lines"
+            diff -q stock.txt pr.txt && echo "$p: identical"
+          done
+      - name: The pull request's cache directory
+        run: |
+          D="$(php -r 'echo sys_get_temp_dir();')/phpstan-opcache-$(id -u)"
+          ls -la "$D"
+          for k in "$D"/*/; do echo "$k $(find "$k" -name '*.bin' | wc -l) entries $(du -sh "$k" | cut -f1)"; done

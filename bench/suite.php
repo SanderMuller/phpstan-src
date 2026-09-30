@@ -20,7 +20,12 @@ foreach ($arms as $arm) {
 	$analyse = "$bin analyse -c phpstan-$arm.neon --no-progress --memory-limit=-1";
 	exec('cd ' . escapeshellarg($project) . " && $analyse > " . (PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null') . ' 2>&1', $o, $ec);
 	echo "primed $suite/$arm, exit $ec\n";
-	$emptyFc = $arm === 'fcve' ? " && $rm --recreate " . escapeshellarg("$w/fcdir-fcve") : '';
+	$emptyFc = match ($arm) {
+		'fcve' => " && $rm --recreate " . escapeshellarg("$w/fcdir-fcve"),
+		// the pull request's cache lives in the system temp dir, shared by the pr and pre arms (same phar)
+		'pre' => " && $rm " . escapeshellarg(sys_get_temp_dir() . '/phpstan-opcache-' . posix_geteuid()),
+		default => '',
+	};
 	foreach ($kinds as $kind) {
 		$cmd = match ($kind) {
 			'ver' => "$bin --version",
