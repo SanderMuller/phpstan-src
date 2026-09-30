@@ -53,8 +53,13 @@ jobs:
           ARMS: stock,fcv,daemon
           DAEMON_SOCKET: ${{ runner.temp }}/d.sock
         run: php bench/suite.php "$RUNNER_TEMP/w" parser 7
+      - name: Daemon request CPU (whole process tree), php-parser lib cold
+        run: |
+          cd "$RUNNER_TEMP/w/projects/parser"
+          for i in 1 2 3; do rm -rf tmp-daemon; DAEMON_CPU=1 php "$GITHUB_WORKSPACE/bench/client.php" "$RUNNER_TEMP/d.sock" analyse -c phpstan-daemon.neon --no-progress --memory-limit=-1 || true; done
       - name: Daemon output check
         run: |
+          set +e
           cd "$RUNNER_TEMP/w/projects/parser"
           php "$RUNNER_TEMP/w/arms/stock/phpstan.phar" analyse -c phpstan-stock.neon --no-progress --error-format=raw > stock.txt; echo "stock exit $?"
           : > "$RUNNER_TEMP/w/daemon.log"
@@ -62,5 +67,5 @@ jobs:
           grep '/lib/' "$RUNNER_TEMP/w/daemon.log" | sed 's#.*/lib/#lib/#' | sort > daemon.txt
           sed 's#.*/lib/#lib/#' stock.txt | grep '^lib/' | sort > stock-sorted.txt
           wc -l daemon.txt stock-sorted.txt
-          diff stock-sorted.txt daemon.txt && echo "daemon errors identical to stock"
+          diff stock-sorted.txt daemon.txt && echo "daemon errors identical to stock" || { echo "DAEMON OUTPUT DIFFERS"; exit 1; }
           php "$GITHUB_WORKSPACE/bench/client.php" "$RUNNER_TEMP/d.sock" diagnose; grep -E 'Turbo extension|Mechanism' "$RUNNER_TEMP/w/daemon.log"

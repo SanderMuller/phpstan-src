@@ -20,13 +20,18 @@ $loop = <<<'PHP'
         if ($__pid === 0) {
             \fclose($__server);
             \chdir($__request['cwd']);
+            // argv[0] must be a real file, or AnalyserRunner analyses in-process instead of in parallel
+            $__request['argv'][0] = \Phar::running(\false);
             $_SERVER['argv'] = $GLOBALS['argv'] = $__request['argv'];
             $_SERVER['argc'] = $GLOBALS['argc'] = \count($__request['argv']);
             $analysisStartTime = \microtime(\true);
             break;
         }
+        $__ru0 = \getrusage(1);
         \pcntl_waitpid($__pid, $__status);
-        \fwrite($__conn, \pcntl_wexitstatus($__status) . "\n");
+        $__ru1 = \getrusage(1);
+        $__cpu = static fn (array $r): float => $r['ru_utime.tv_sec'] + $r['ru_utime.tv_usec'] / 1e6 + $r['ru_stime.tv_sec'] + $r['ru_stime.tv_usec'] / 1e6;
+        \fwrite($__conn, \pcntl_wexitstatus($__status) . ' ' . \round($__cpu($__ru1) - $__cpu($__ru0), 3) . "\n");
         \fclose($__conn);
     }
 
