@@ -22,6 +22,7 @@ use function in_array;
 use function ini_get;
 use function is_dir;
 use function is_link;
+use function is_writable;
 use function max;
 use function mkdir;
 use function phpversion;
@@ -296,7 +297,12 @@ final class OpcacheSettings
 		}
 
 		$permissions = @fileperms($directory);
-		return @fileowner($directory) === $userId && $permissions !== false && ($permissions & 0022) === 0;
+		if (@fileowner($directory) !== $userId || $permissions === false || ($permissions & 0022) !== 0) {
+			return false;
+		}
+
+		// OPcache refuses to start at all - exit code 254 - when it cannot write to opcache.file_cache
+		return is_writable($directory);
 	}
 
 	/**
