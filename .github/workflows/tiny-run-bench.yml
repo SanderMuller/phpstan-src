@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04]
+        php: ["8.3", "8.4"]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -23,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.5"
+          php-version: ${{ matrix.php }}
           coverage: none
           tools: composer
       - name: Install and build arms
@@ -35,16 +36,10 @@ jobs:
           php bench/project/vendor/phpstan/phpstan/phpstan.phar --version
           git clone -q --depth 1 https://github.com/nikic/PHP-Parser "$RUNNER_TEMP/php-parser"
           php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan stock pr pre prci
-          if [ "$RUNNER_OS" = Linux ]; then
-            git clone -q --depth 1 https://github.com/tempestphp/tempest-framework "$RUNNER_TEMP/tempest"
-            (cd "$RUNNER_TEMP/tempest" && composer install -q --no-interaction --ignore-platform-reqs --no-scripts)
-            php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib" "$RUNNER_TEMP/tempest"
-          else
-            php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib"
-          fi
+          php bench/prepare.php "$W" "$RUNNER_TEMP/php-parser/lib"
           php bench/setup.php "$W" bench/project/vendor/phpstan/phpstan --neon-only
           cd "$W/projects/tiny"
-          env -u CI -u GITHUB_ACTIONS php "$W/arms/pr/phpstan.phar" diagnose | grep -E 'Turbo extension|trusted|Mechanism'
+          env -u CI -u GITHUB_ACTIONS php "$W/arms/pr/phpstan.phar" diagnose | grep -E 'Turbo extension|trusted|Mechanism|OPcache file cache'
           php "$W/arms/prci/phpstan.phar" diagnose | grep -E 'Turbo extension|trusted|Mechanism'
       - name: Tiny project
         env:
@@ -54,15 +49,6 @@ jobs:
         env:
           ARMS: stock,pr,pre,prci
         run: php bench/suite.php "$RUNNER_TEMP/w" parser 7
-      - name: php-parser lib, spawned workers
-        env:
-          ARMS: stock,pr,pre
-        run: php bench/suite.php "$RUNNER_TEMP/w" spawn 7
-      - name: Tempest (full)
-        if: runner.os == 'Linux'
-        env:
-          ARMS: stock,pr,pre
-        run: php bench/suite.php "$RUNNER_TEMP/w" tempest 3
       - name: Same errors as stock
         run: |
           set +e
